@@ -49,12 +49,15 @@ PY
 # Install Xray-core (official Gozargah helper script keeps the version current).
 RUN curl -L https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh | bash
 
-# Build the dashboard's static assets.
+# Build the dashboard's static assets, then drop the build-only npm tree: the
+# React/Vite node_modules directory is not needed at runtime and its bundled
+# toolchain packages carry advisories the image scanner blocks on.
 RUN cd app/dashboard \
     && npm install --no-audit --no-fund \
     && VITE_BASE_API=/api/ npm run build --if-present -- --outDir build --assetsDir statics \
     && cp build/index.html build/404.html \
-    && cd ../..
+    && cd ../.. \
+    && rm -rf app/dashboard/node_modules app/dashboard/.vite
 
 RUN python3 -m pip install --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
