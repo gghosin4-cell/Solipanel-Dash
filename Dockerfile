@@ -27,6 +27,25 @@ ARG MARZBAN_REPO=https://github.com/Gozargah/Marzban.git
 ARG MARZBAN_REF=master
 RUN git clone --depth 1 --branch ${MARZBAN_REF} ${MARZBAN_REPO} .
 
+# Upstream Marzban (master, 0.8.4) was written against Starlette < 1.0. The
+# Starlette 1.x releases are the only ones without published high-severity
+# advisories, so we upgrade to them and apply the minimal compatibility fix:
+# app.routes can now contain an included-router placeholder that has no .path.
+RUN python3 - <<'PY'
+import io, sys
+p = "app/__init__.py"
+src = io.open(p, encoding="utf-8").read()
+old = 'paths = [f"{r.path}/" for r in app.routes]'
+new = 'paths = [f"{getattr(r, \'path\', \'\')}/" for r in app.routes]'
+if new in src:
+    print("compat patch already applied")
+elif old in src:
+    io.open(p, "w", encoding="utf-8").write(src.replace(old, new))
+    print("compat patch applied")
+else:
+    sys.exit("could not locate the route-path block to patch")
+PY
+
 # Install Xray-core (official Gozargah helper script keeps the version current).
 RUN curl -L https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh | bash
 
