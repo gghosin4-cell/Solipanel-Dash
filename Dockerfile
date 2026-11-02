@@ -1,23 +1,26 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
-# Marzban panel - Railway deploy wrapper (build-time clone, like PasarGuard)
+# Marzban panel - AppJet deploy wrapper (build-time clone, like PasarGuard)
+#
+# Base is Alpine (musl) on purpose. Debian's glibc/acl/attr carry
+# high/critical advisories that have NO distributor fix in Debian 13 or 12,
+# and OSV keys those entries to the glibc source package, so every glibc based
+# image is rejected by the container-image-osv-v1 policy. The musl base has no
+# glibc package at all, which removes that whole finding class.
 # ---------------------------------------------------------------------------
 ARG PYTHON_VERSION=3.12
 
-FROM python:${PYTHON_VERSION}-slim AS builder
+FROM python:${PYTHON_VERSION}-alpine AS builder
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    DEBIAN_FRONTEND=noninteractive
+    PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential gcc python3-dev libpq-dev git curl unzip ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Node.js is needed only to build the React/Vite dashboard from source.
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Toolchain for the native Python deps that ship no musllinux wheel (psutil is
+# sdist-only), plus git/nodejs for the upstream clone and dashboard build.
+RUN apk add --no-cache --upgrade \
+        build-base gcc musl-dev linux-headers libffi-dev openssl-dev \
+        postgresql-dev git curl bash unzip ca-certificates \
+        nodejs npm
 
 WORKDIR /build
 
@@ -47,6 +50,8 @@ else:
 PY
 
 # Install Xray-core (official Gozargah helper script keeps the version current).
+# It just downloads the static Go release - no package manager involved - so it
+# works unchanged on musl.
 RUN curl -L https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh | bash
 
 # Build the dashboard's static assets, then drop the build-only npm tree: the
@@ -84,7 +89,7 @@ RUN pip install --no-cache-dir --upgrade \
 # ---------------------------------------------------------------------------
 # Runtime image
 # ---------------------------------------------------------------------------
-FROM python:${PYTHON_VERSION}-slim
+FROM python:${PYTHON_VERSION}-alpine
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHON_LIB_PATH=/usr/local/lib/python3.12/site-packages \
@@ -96,12 +101,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /code
 
 # Apply the distributor's fixed packages and deliberately do NOT install curl:
-# the image only used it for the healthcheck, and the current Debian curl/libcurl
-# carries unfixed critical CVEs. The healthcheck below uses the Python stdlib.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 ca-certificates \
-    && apt-get upgrade -y \
-    && rm -rf /var/lib/apt/lists/*
+# the image only used it for the healthcheck, and libcurl is a recurring source
+# of unfixed findings. The healthcheck below uses the Python stdlib instead.
+RUN apk add --no-cache --upgrade \
+        bash ca-certificates libpq libstdc++ tzdata \
+    && apk upgrade --no-cache
 
 COPY --from=builder $PYTHON_LIB_PATH $PYTHON_LIB_PATH
 COPY --from=builder /usr/local/bin /usr/local/bin
@@ -111,14 +115,14 @@ COPY --from=builder /build /code
 # apscheduler (a Marzban dependency) still imports pkg_resources at import time.
 # The newest setuptools releases REMOVED pkg_resources entirely, so merely
 # upgrading setuptools doesn't help - we must pin a version that still ships it.
-RUN pip install --no-cache-dir "setuptools==75.8.0"
+RUN pip install --no-cache-dir --no-build-isolation "setuptools==75.8.0"
 
 COPY start-railway.sh /code/start-railway.sh
 RUN chmod +x /code/start-railway.sh \
     && ln -sf /code/marzban-cli.py /usr/bin/marzban-cli \
     && chmod +x /usr/bin/marzban-cli
 
-RUN useradd -m -u 1000 appuser \
+RUN adduser -D -u 1000 appuser \
     && mkdir -p /code/data /var/lib/marzban \
     && chown -R appuser:appuser /code /var/lib/marzban
 USER appuser
