@@ -92,8 +92,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /code
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq5 ca-certificates curl \
+# Apply the distributor's fixed packages and deliberately do NOT install curl:
+# the image only used it for the healthcheck, and the current Debian curl/libcurl
+# carries unfixed critical CVEs. The healthcheck below uses the Python stdlib.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 ca-certificates \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder $PYTHON_LIB_PATH $PYTHON_LIB_PATH
