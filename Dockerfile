@@ -112,10 +112,54 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/local/share/xray /usr/local/share/xray
 COPY --from=builder /build /code
 
-# apscheduler (a Marzban dependency) still imports pkg_resources at import time.
-# The newest setuptools releases REMOVED pkg_resources entirely, so merely
-# upgrading setuptools doesn't help - we must pin a version that still ships it.
-RUN pip install --no-cache-dir --no-build-isolation "setuptools==75.8.0"
+# Tooling hygiene for the final image.
+#
+# setuptools: Marzban's dependency tree still imports pkg_resources, which
+# setuptools 82+ removed. 81.0.0 is the newest release that still ships it, and
+# it also resolves the packaging advisories: setuptools itself is past the
+# PYSEC-2025-49 fix (78.1.1), and its vendored copies are now
+# jaraco_context 6.1.0 (PYSEC-2026-1469 fixed in 6.1.0) and
+# wheel 0.46.3 (PYSEC-2026-2047 fixed in 0.46.2). setuptools 75.8/78/80 all
+# still vendored the vulnerable jaraco.context 5.3.0 + wheel 0.43-0.45.
+#
+# pip: the base image's interpreter ships a stale bundled wheel at
+# /usr/local/lib/python3.12/ensurepip/_bundled/pip-25.0.1-*.whl that the image
+# scanner reads directly, and upgrading the installed pip never touches it.
+# Replace that wheel with a current one and keep ensurepip's pinned version in
+# sync so `python -m venv` keeps working.
+RUN set -eux; \
+    pip install --no-cache-dir --upgrade "pip==26.2.2" "setuptools==81.0.0"; \
+    python3 - <<'PY'
+import ensurepip
+import glob
+import os
+import re
+import subprocess
+import sys
+
+NEW_PIP = "26.2.2"
+pkg_dir = os.path.dirname(ensurepip.__file__)
+bundled = os.path.join(pkg_dir, "_bundled")
+
+for stale in glob.glob(os.path.join(bundled, "pip-*.whl")):
+    os.remove(stale)
+    print("removed stale bundled wheel:", os.path.basename(stale))
+
+subprocess.check_call(
+    [sys.executable, "-m", "pip", "download", "--no-cache-dir", "--no-deps",
+     "--only-binary", ":all:", "--dest", bundled, "pip==" + NEW_PIP]
+)
+
+init = os.path.join(pkg_dir, "__init__.py")
+src = open(init, encoding="utf-8").read()
+src = re.sub(r'_PIP_VERSION = "[^"]*"', '_PIP_VERSION = "%s"' % NEW_PIP, src, count=1)
+open(init, "w", encoding="utf-8").write(src)
+PY
+
+# Fail the build loudly if the tooling upgrade broke the interpreter contract.
+RUN python3 -c 'import pkg_resources, setuptools; print("setuptools", setuptools.__version__, "pkg_resources ok")' \
+    && python3 -m ensurepip --version \
+    && python3 -m pip --version
 
 COPY start-railway.sh /code/start-railway.sh
 RUN chmod +x /code/start-railway.sh \
