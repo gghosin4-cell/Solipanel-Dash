@@ -40,6 +40,22 @@ RUN cd app/dashboard \
 RUN python3 -m pip install --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
 
+# Upstream Marzban pins several libraries that carry published high/critical
+# advisories (anyio, certifi, PyJWT, cryptography, pyOpenSSL, python-multipart,
+# starlette, urllib3, requests). Upgrade them to the fixed releases on top of
+# the upstream requirements so the final image is not blocked by the scanner.
+RUN pip install --no-cache-dir --upgrade \
+        "PyJWT==2.15.1" \
+        "anyio==4.16.0" \
+        "certifi==2026.10.23" \
+        "cryptography==50.0.2" \
+        "pyOpenSSL==26.4.0" \
+        "python-multipart==0.0.33" \
+        "urllib3==2.8.0" \
+        "requests==2.34.2" \
+        "fastapi==0.162.0" \
+        "starlette==1.10.0"
+
 # ---------------------------------------------------------------------------
 # Runtime image
 # ---------------------------------------------------------------------------
