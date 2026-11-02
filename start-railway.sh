@@ -9,7 +9,7 @@ set -euo pipefail
 cd /code
 
 export HOST="0.0.0.0"
-export PORT="${PORT:-8000}"
+export PORT="${PORT:-8080}"
 export UVICORN_HOST="$HOST"
 export UVICORN_PORT="$PORT"
 export SQLALCHEMY_DATABASE_URL="${SQLALCHEMY_DATABASE_URL:-sqlite:////code/db.sqlite3}"
