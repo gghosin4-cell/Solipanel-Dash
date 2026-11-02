@@ -123,7 +123,7 @@ USER appuser
 # Keep the exposed port in sync with the configured AppJet deployment port.
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=5 \
-    CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/" || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+    CMD python3 -c 'import os,sys,urllib.request; port=os.environ.get("PORT","8080"); sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:%s/" % port, timeout=4).status < 400 else 1)'
 
 ENTRYPOINT ["bash", "/code/start-railway.sh"]
